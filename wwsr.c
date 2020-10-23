@@ -1,9 +1,19 @@
 /*
  * wwsr - Wireless Weather Station Reader
  * 2007 dec 19, Michael Pendec (michael.pendec@gmail.com)
- * Version 0.2 
- *     30.10.2008
- *         - MySQL support by Michael Andersson (oh1jty@toimii.net)
+ *
+ * Version 0.3beta
+ *
+ *     09.01.2010  Michael Andersson (oh1jty@toimii.net)
+ *	   - Fix for negative temperature
+ *         - Reads current data
+ *     01.11.2008  Michael Andersson (oh1jty@toimii.net)
+ *         - Time and Date output
+ *         - Better error handling for mysql
+ *         - Config file support for mysql settings
+ *     30.10.2008  Michael Andersson (oh1jty@toimii.net)
+ *         - MySQL support
+ *
  */
 #include <stdio.h>
 #include <string.h>
@@ -20,9 +30,10 @@
 struct usb_dev_handle *devh;
 int	ret,mempos=0,showall=0,shownone=0,resetws=0,pdebug=0,mysql=0,pverbose=0;
 int	o1,o2,o3,o4,o5,o6,o7,o8,o9,o10,o11,o12,o13,o14,o15;
-char time_format[160],
-        dtf[160],
-        timed[1024];
+unsigned char time_format[160],
+              dtf[160],
+              timed[1024];
+time_t	mytime;
 char	buf[1000],*endptr;
 char	buf2[400];
 char    out1[8],
@@ -40,10 +51,10 @@ char    db_conf_file[1024] = "/usr/local/etc/wwsr.conf",                     /* 
         dbhost[16],                             /* MySQL hostname          */
         dbpass[16],                             /* MySQL password          */
         dbname[16];                             /* MySQL database name     */
-
-time_t	mytime;
-struct tm * timeinfo;
                                         
+time_t mytime;
+struct tm * timeinfo;
+
 void _close_readw() {
     ret = usb_release_interface(devh, 0);
     if (ret!=0) printf("could not release interface: %d\n", ret);
@@ -232,8 +243,8 @@ void read_arguments(int argc, char **argv) {
 	     shownone=1;
              break;
            case 'v':
-  	     pverbose=1;
-  	     break;
+             pverbose=1;
+             break;
            case 'p':
   	     mempos1=optarg;
              break;
@@ -257,7 +268,7 @@ void read_arguments(int argc, char **argv) {
            }
 	}
 	if ( (pinfo!=0) | (shownone==0) ) {
-		printf("Wireless Weather Station Reader v0.2\n");
+		printf("Wireless Weather Station Reader v0.3\n");
 		printf("(C) 2007 Michael Pendec\n\n");
 		printf("options\n");
 		printf(" -h	help information\n");
@@ -271,7 +282,7 @@ void read_arguments(int argc, char **argv) {
 		printf(" -u	Show humidity\n");
 		printf(" -r	Show rain\n");
 		printf(" -w	Show wind\n");
-		printf(" -o	other \n\n");
+		printf(" -o	Other \n\n");
 		printf(" -m     Log to mysql\n\n");
 		printf(" -v     Verbose mode\n\n");
 		exit(0);
@@ -293,8 +304,7 @@ int read_rcdbfile( char *fname )
   if( ( fp = fopen( fname, "r" ) ) == NULL )
   {
     /* No rcfile to read, could be part of an -i so don't die */
-    printf("\nMySQL conf file problem: %s. exiting\n\n", db_conf_file);
-    exit(0);
+    return 1;
   }
   
   while( fgets( temp, 80, fp ) != 0 )
@@ -330,253 +340,267 @@ int read_rcdbfile( char *fname )
 }
 
 int main(int argc, char **argv) {
-    int	buftemp;
+    int		buftemp;
     char ec='n';
     char query[1024];
-
+    
     read_arguments(argc,argv);
     /* Get time and date */
     time ( &mytime );
     strcpy(dtf, "%Y-%m-%d %H:%M:%S");
     strftime( timed, 1024, dtf, localtime( &mytime ) );
+    struct tempstat buf5;
 
     if (resetws==1) {
-       _open_readw();
-       _init_wread();
-       printf(" Resetting WetterStation history\n");
-       printf("Sure you want to reset wetter station (y/N)?");
-       fflush(stdin);
-       scanf("%c",&ec);
-       if ( (ec=='y') || (ec=='Y') ) {
-     	  _send_usb_msg("\xa0","\x00","\x00","\x20","\xa0","\x00","\x00","\x20");
-      	  _send_usb_msg("\x55","\x55","\xaa","\xff","\xff","\xff","\xff","\xff");
-	  usleep(28*1000);
-	  _send_usb_msg("\xff","\xff","\xff","\xff","\xff","\xff","\xff","\xff");
-	  usleep(28*1000);
-	  _send_usb_msg("\x05","\x20","\x01","\x38","\x11","\x00","\x00","\x00");
-	  usleep(28*1000);
-	  _send_usb_msg("\x00","\x00","\xaa","\x00","\x00","\x00","\x20","\x3e");
-	  usleep(28*1000);
+      _open_readw();
+      _init_wread();
+      printf(" Resetting WetterStation history\n");
+      printf("Sure you want to reset wetter station (y/N)?");
+      fflush(stdin);
+      scanf("%c",&ec);
+      if ( (ec=='y') || (ec=='Y') ) {
+     	 _send_usb_msg("\xa0","\x00","\x00","\x20","\xa0","\x00","\x00","\x20");
+     	 _send_usb_msg("\x55","\x55","\xaa","\xff","\xff","\xff","\xff","\xff");
+     	 usleep(28*1000);
+     	 _send_usb_msg("\xff","\xff","\xff","\xff","\xff","\xff","\xff","\xff");
+         usleep(28*1000);
+         _send_usb_msg("\x05","\x20","\x01","\x38","\x11","\x00","\x00","\x00");
+         usleep(28*1000);
+         _send_usb_msg("\x00","\x00","\xaa","\x00","\x00","\x00","\x20","\x3e");
+         usleep(28*1000);
        } else {
-     	  printf(" Aborted reset of history buffer\n");
+     	 printf(" Aborted reset of history buffer\n");
        }
        _close_readw();
        return 0;
-    } else if(mysql == 1) {
+     } else if(mysql == 1) {
+       
+            read_rcdbfile( db_conf_file);
+           /* Init device */
+           _open_readw();
+           _init_wread();
+           
+           /* USB stuff */
+           _send_usb_msg("\xa1","\x00","\x00","\x20","\xa1","\x00","\x00","\x20");
+           _read_usb_msg(buf2);
+           _send_usb_msg("\xa1","\x00","\x20","\x20","\xa1","\x00","\x20","\x20");
+           _read_usb_msg(buf2+32);
+           _send_usb_msg("\xa1","\x00","\x40","\x20","\xa1","\x00","\x40","\x20");
+           _read_usb_msg(buf2+64);
+           _send_usb_msg("\xa1","\x00","\x60","\x20","\xa1","\x00","\x60","\x20");
+           _read_usb_msg(buf2+96);
+           _send_usb_msg("\xa1","\x00","\x80","\x20","\xa1","\x00","\x80","\x20");
+           _read_usb_msg(buf2+128);
+           _send_usb_msg("\xa1","\x00","\xa0","\x20","\xa1","\x00","\xa0","\x20");
+           _read_usb_msg(buf2+160);
+           _send_usb_msg("\xa1","\x00","\xc0","\x20","\xa1","\x00","\xc0","\x20");
+           _read_usb_msg(buf2+192);
+           _send_usb_msg("\xa1","\x00","\xe0","\x20","\xa1","\x00","\xe0","\x20");
+           _read_usb_msg(buf2+224);
 
-          read_rcdbfile( db_conf_file);
+           //  buf4.noffset = (unsigned char) buf2[22] + ( 256 * buf2[23] );
+           buf4.noffset = (unsigned char) buf2[30] + ( 256 * buf2[31] );
+           if (mempos!=0) buf4.noffset = mempos;
+           buftemp = 0;
+           if (buf4.noffset!=0) buftemp = buf4.noffset - 0x10;
+           buf[1] = ( buftemp >>8 & 0xFF ) ;
+           buf[2] = buftemp & 0xFF;
+           buf[3] = ( buftemp >>8 & 0xFF ) ;
+           buf[4] = buftemp & 0xFF;
+           _send_usb_msg("\xa1",buf+1,buf+2,"\x20","\xa1",buf+3,buf+4,"\x20");
+           _read_usb_msg(buf2+224);
+
+           ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE, 0x0000009, 0x0000200, 0x0000000, buf, 0x0000008, 1000);
+           // usleep(8*1000);
+           ret = usb_interrupt_read(devh, 0x00000081, buf, 0x0000020, 1000);
+           memcpy(buf2+256, buf, 0x0000020);
+           if ( ( pdebug==1) ) printf("bytes received from device details:\n");
+           if ( ( pdebug==1) ) print_bytes(buf2+272, 16);
+           if ( ( pdebug==1) ) printf("\n");
+
+           buf5.delay1 = buf2[240];
+           buf5.tempi=buf2[252];
+           if (buf5.tempi==0) strcpy(buf5.winddirection,"N");
+           if (buf5.tempi==1) strcpy(buf5.winddirection,"NNE");
+           if (buf5.tempi==2) strcpy(buf5.winddirection,"NE");
+           if (buf5.tempi==3) strcpy(buf5.winddirection,"ENE");
+           if (buf5.tempi==4) strcpy(buf5.winddirection,"E");
+           if (buf5.tempi==5) strcpy(buf5.winddirection,"ESE");
+           if (buf5.tempi==6) strcpy(buf5.winddirection,"SE");
+           if (buf5.tempi==7) strcpy(buf5.winddirection,"SSE");
+           if (buf5.tempi==8) strcpy(buf5.winddirection,"S");
+           if (buf5.tempi==9) strcpy(buf5.winddirection,"SSW");
+           if (buf5.tempi==10) strcpy(buf5.winddirection,"SW");
+           if (buf5.tempi==11) strcpy(buf5.winddirection,"WSW");
+           if (buf5.tempi==12) strcpy(buf5.winddirection,"W");
+           if (buf5.tempi==13) strcpy(buf5.winddirection,"WNW");
+           if (buf5.tempi==14) strcpy(buf5.winddirection,"NW");
+           if (buf5.tempi==15) strcpy(buf5.winddirection,"NNW");
+           buf5.hindoor = buf2[241];
+           buf5.tindoor =( (unsigned char) buf2[242] + (unsigned char) buf2[243] *256);
+           buf5.tindoor &= 32767;
+           buf5.houtdoor = buf2[244];
+           buf5.toutdoor =( (unsigned char) buf2[245] + (unsigned char) buf2[246] *256);
+           buf5.toutdoor &= 32767;
+           buf5.pressure = (unsigned char) buf2[247] + ( 256*buf2[248]);
+           buf5.swind = buf2[249];
+           buf5.swind2 = buf2[250];
+           buf5.oth1  = buf2[251];
+           buf5.rain2 = (unsigned char) buf2[253];
+           buf5.rain =( (unsigned char) buf2[254] + (unsigned char) buf2[255] *256);
+           buf5.rain1 = buf2[254];
+           buf5.oth2 = buf2[255];
+
+          printf("\n");
+          unsigned int remain;
+          sprintf(out1, "%d", buf5.hindoor);
+          sprintf(out2, "%d", buf5.houtdoor);
+	  if ((buf2[243] & 128) > 0) {
+  	    sprintf(out3, "-%d.%d", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
+          } else {
+  	    sprintf(out3, "%d.%d", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
+          }
+	  if ((buf2[246] & 128) > 0) {
+  	    sprintf(out4, "-%d.%d", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
+          } else {
+  	    sprintf(out4, "%d.%d", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
+          }
+          remain = buf5.swind%10;
+          sprintf(out5, "%d.%d", buf5.swind / 10 , remain);
+          remain = buf5.swind2%10;
+          sprintf(out6, "%d.%d", buf5.swind2 / 10 , remain);
+          sprintf(out7, "%s", buf5.winddirection);
+          remain = buf5.rain%10;
+          sprintf(out8, "%d.%d", buf5.rain / 10 , remain);
+          remain = (buf5.rain2)%10;
+          sprintf(out9, "%d.%d", buf5.rain2 / 10 , remain);
+          remain = buf5.pressure%10;
+          sprintf(out10, "%d.%d", buf5.pressure / 10 , remain);
+          printf("\n");
+
           /* open the mysql database */
-          MYSQL *conn;
+           MYSQL *conn;
           conn = mysql_init(NULL);
           if ( (pdebug == 1) ) printf("\nhost: %s, user: %s, pass: %s, db: %s\n", dbhost, dbuser, dbpass, dbname);
-          mysql_real_connect (conn,dbhost,dbuser,dbpass,
-			  dbname,0,NULL,0);
-          /* */
-          _open_readw();
-          _init_wread();
-           
-          /* USB stuff */
-          _send_usb_msg("\xa1","\x00","\x00","\x20","\xa1","\x00","\x00","\x20");
-          _read_usb_msg(buf2);
-          _send_usb_msg("\xa1","\x00","\x20","\x20","\xa1","\x00","\x20","\x20");
-          _read_usb_msg(buf2+32);
-          _send_usb_msg("\xa1","\x00","\x40","\x20","\xa1","\x00","\x40","\x20");
-          _read_usb_msg(buf2+64);
-          _send_usb_msg("\xa1","\x00","\x60","\x20","\xa1","\x00","\x60","\x20");
-          _read_usb_msg(buf2+96);
-          _send_usb_msg("\xa1","\x00","\x80","\x20","\xa1","\x00","\x80","\x20");
-          _read_usb_msg(buf2+128);
-          _send_usb_msg("\xa1","\x00","\xa0","\x20","\xa1","\x00","\xa0","\x20");
-          _read_usb_msg(buf2+160);
-          _send_usb_msg("\xa1","\x00","\xc0","\x20","\xa1","\x00","\xc0","\x20");
-          _read_usb_msg(buf2+192);
-          _send_usb_msg("\xa1","\x00","\xe0","\x20","\xa1","\x00","\xe0","\x20");
-          _read_usb_msg(buf2+224);
-
-          //  buf4.noffset = (unsigned char) buf2[22] + ( 256 * buf2[23] );
-          buf4.noffset = (unsigned char) buf2[30] + ( 256 * buf2[31] );
-          if (mempos!=0) buf4.noffset = mempos;
-          buftemp = 0;
-          if (buf4.noffset!=0) buftemp = buf4.noffset - 0x10;
-          buf[1] = ( buftemp >>8 & 0xFF ) ;
-          buf[2] = buftemp & 0xFF;
-          buf[3] = ( buftemp >>8 & 0xFF ) ;
-          buf[4] = buftemp & 0xFF;
-          _send_usb_msg("\xa1",buf+1,buf+2,"\x20","\xa1",buf+3,buf+4,"\x20");
-          _read_usb_msg(buf2+224);
-          ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE, 0x0000009, 0x0000200, 0x0000000, buf, 0x0000008, 1000);
-          // usleep(8*1000);
-          ret = usb_interrupt_read(devh, 0x00000081, buf, 0x0000020, 1000);
-          memcpy(buf2+256, buf, 0x0000020);
-          if ( ( pdebug==1) ) printf("bytes received from device details:\n");
-          if ( ( pdebug==1) ) print_bytes(buf2+272, 16);
-          if ( ( pdebug==1) ) printf("\n");
-          buf4.delay1 = buf2[272];
-          buf4.tempi=buf2[284];
-          if (buf4.tempi==0) strcpy(buf4.winddirection,"N");
-          if (buf4.tempi==1) strcpy(buf4.winddirection,"NNE");
-          if (buf4.tempi==2) strcpy(buf4.winddirection,"NE");
-          if (buf4.tempi==3) strcpy(buf4.winddirection,"ENE");
-          if (buf4.tempi==4) strcpy(buf4.winddirection,"E");
-          if (buf4.tempi==5) strcpy(buf4.winddirection,"SEE");
-          if (buf4.tempi==6) strcpy(buf4.winddirection,"SE");
-          if (buf4.tempi==7) strcpy(buf4.winddirection,"SSE");
-          if (buf4.tempi==8) strcpy(buf4.winddirection,"S");
-          if (buf4.tempi==9) strcpy(buf4.winddirection,"SSW");
-          if (buf4.tempi==10) strcpy(buf4.winddirection,"SW");
-          if (buf4.tempi==11) strcpy(buf4.winddirection,"SWW");
-          if (buf4.tempi==12) strcpy(buf4.winddirection,"W");
-          if (buf4.tempi==13) strcpy(buf4.winddirection,"NWW");
-          if (buf4.tempi==14) strcpy(buf4.winddirection,"NW");
-          if (buf4.tempi==15) strcpy(buf4.winddirection,"NNW");
-          buf4.hindoor = buf2[273];
-          buf4.tindoor =( (unsigned char) buf2[274] + (unsigned char) buf2[275] *256);
-          buf4.houtdoor = buf2[276];
-          buf4.toutdoor =( (unsigned char) buf2[277] + (unsigned char) buf2[278] *256);
-          buf4.pressure = (unsigned char) buf2[279] + ( 256*buf2[280]);
-          buf4.swind = buf2[281];
-          buf4.swind2 = buf2[282];
-          buf4.oth1  = buf2[283];
-          buf4.rain2 = (unsigned char) buf2[285];
-          buf4.rain =( (unsigned char) buf2[286] + (unsigned char) buf2[287] *256);
-          buf4.rain1 = buf2[286];
-          buf4.oth2 = buf2[287];
-
-          unsigned int remain;
-          sprintf(out1, "%x", buf4.hindoor);
-          sprintf(out2, "%d", buf4.houtdoor);
-          remain = buf4.tindoor%10;
-          if ((signed) remain<0) remain = remain * -1;
-          sprintf(out3, "%d.%d", buf4.tindoor / 10 ,remain);
-          remain = buf4.toutdoor%10;
-          if ((signed) remain<0) remain = remain * -1;
-          sprintf(out4, "%d.%d", buf4.toutdoor / 10 ,remain);
-          remain = buf4.swind%10;
-          sprintf(out5, "%d.%d", buf4.swind / 10 , remain);
-          remain = buf4.swind2%10;
-          sprintf(out6, "%d.%d", buf4.swind2 / 10 , remain);
-          sprintf(out7, "%s", buf4.winddirection);
-          remain = buf4.rain%10;
-          sprintf(out8, "%d.%d", buf4.rain / 10 , remain);
-          remain = (buf4.rain2)%10;
-          sprintf(out9, "%d.%d", buf4.rain2 / 10 , remain);
-          remain = buf4.pressure%10;
-          sprintf(out10, "%d.%d", buf4.pressure / 10 , remain);
-
+          mysql_real_connect (conn,dbhost,dbuser,dbpass, dbname,0,NULL,0);
           sprintf(query, "insert into wwsr set hindoor='%s', houtdoor='%s', tindoor='%s', toutdoor='%s', windspeed='%s', windgust='%s', winddirect='%s', prain='%s', srain='%s', pressure='%s', time_date='%s'",
                   out1, out2, out3, out4, out5, out6, out7, out8, out9, out10, timed);
+
           /* execute it */
           if(mysql_query (conn, query) != 0) {
               fprintf(stderr, "\nError!! MySQL INSERT failed!\n%d: %s\n", mysql_errno(conn), mysql_error(conn));
           }
+          /* close mysql connection */
           mysql_close(conn);
           if ( ( pverbose==1) ) printf("Query: %s\n", query);
           _close_readw();
           return 0;
-    } else {
-        timeinfo = localtime ( &mytime );
-        printf ( "\nCurrent local time and date: %s", asctime (timeinfo) );
-        /* */
-        _open_readw();
-        _init_wread();
+   } else {
+       timeinfo = localtime ( &mytime );
+       printf ( "\nCurrent local time and date: %s", asctime (timeinfo) );
+       /* Init device*/
+       _open_readw();
+       _init_wread();
+                             
+       _send_usb_msg("\xa1","\x00","\x00","\x20","\xa1","\x00","\x00","\x20");
+       _read_usb_msg(buf2);
+       _send_usb_msg("\xa1","\x00","\x20","\x20","\xa1","\x00","\x20","\x20");
+       _read_usb_msg(buf2+32);
+       _send_usb_msg("\xa1","\x00","\x40","\x20","\xa1","\x00","\x40","\x20");
+       _read_usb_msg(buf2+64);
+       _send_usb_msg("\xa1","\x00","\x60","\x20","\xa1","\x00","\x60","\x20");
+       _read_usb_msg(buf2+96);
+       _send_usb_msg("\xa1","\x00","\x80","\x20","\xa1","\x00","\x80","\x20");
+       _read_usb_msg(buf2+128);
+       _send_usb_msg("\xa1","\x00","\xa0","\x20","\xa1","\x00","\xa0","\x20");
+       _read_usb_msg(buf2+160);
+       _send_usb_msg("\xa1","\x00","\xc0","\x20","\xa1","\x00","\xc0","\x20");
+       _read_usb_msg(buf2+192);
+       _send_usb_msg("\xa1","\x00","\xe0","\x20","\xa1","\x00","\xe0","\x20");
+       _read_usb_msg(buf2+224);
 
-        _send_usb_msg("\xa1","\x00","\x00","\x20","\xa1","\x00","\x00","\x20");
-        _read_usb_msg(buf2);
-        _send_usb_msg("\xa1","\x00","\x20","\x20","\xa1","\x00","\x20","\x20");
-        _read_usb_msg(buf2+32);
-        _send_usb_msg("\xa1","\x00","\x40","\x20","\xa1","\x00","\x40","\x20");
-        _read_usb_msg(buf2+64);
-        _send_usb_msg("\xa1","\x00","\x60","\x20","\xa1","\x00","\x60","\x20");
-        _read_usb_msg(buf2+96);
-        _send_usb_msg("\xa1","\x00","\x80","\x20","\xa1","\x00","\x80","\x20");
-        _read_usb_msg(buf2+128);
-        _send_usb_msg("\xa1","\x00","\xa0","\x20","\xa1","\x00","\xa0","\x20");
-        _read_usb_msg(buf2+160);
-        _send_usb_msg("\xa1","\x00","\xc0","\x20","\xa1","\x00","\xc0","\x20");
-        _read_usb_msg(buf2+192);
-        _send_usb_msg("\xa1","\x00","\xe0","\x20","\xa1","\x00","\xe0","\x20");
-        _read_usb_msg(buf2+224);
+       buf4.noffset = (unsigned char) buf2[30] + ( 256 * buf2[31] );
+       if (mempos!=0) buf4.noffset = mempos;
+       buftemp = 0;
+       if (buf4.noffset!=0) buftemp = buf4.noffset - 0x10;
+       buf[1] = ( buftemp >>8 & 0xFF ) ;
+       buf[2] = buftemp & 0xFF;
+       buf[3] = ( buftemp >>8 & 0xFF ) ;
+       buf[4] = buftemp & 0xFF;
+       _send_usb_msg("\xa1",buf+1,buf+2,"\x20","\xa1",buf+3,buf+4,"\x20");
+       _read_usb_msg(buf2+224);
 
-
-        //  buf4.noffset = (unsigned char) buf2[22] + ( 256 * buf2[23] );
-        buf4.noffset = (unsigned char) buf2[30] + ( 256 * buf2[31] );
-        if (mempos!=0) buf4.noffset = mempos;
-        buftemp = 0;
-        if (buf4.noffset!=0) buftemp = buf4.noffset - 0x10;
-        buf[1] = ( buftemp >>8 & 0xFF ) ;
-        buf[2] = buftemp & 0xFF;
-        buf[3] = ( buftemp >>8 & 0xFF ) ;
-        buf[4] = buftemp & 0xFF;
-        _send_usb_msg("\xa1",buf+1,buf+2,"\x20","\xa1",buf+3,buf+4,"\x20");
-        _read_usb_msg(buf2+224);
-
-        ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE, 0x0000009, 0x0000200, 0x0000000, buf, 0x0000008, 1000);
-        // usleep(8*1000);
-        ret = usb_interrupt_read(devh, 0x00000081, buf, 0x0000020, 1000);
-        memcpy(buf2+256, buf, 0x0000020);
-        if ( ( pdebug==1) ) printf("bytes received from device details:\n");
-        if ( ( pdebug==1) ) print_bytes(buf2+272, 16);
-        if ( ( pdebug==1) ) printf("\n");
-        buf4.delay1 = buf2[272];
-        buf4.tempi=buf2[284];
-	if (buf4.tempi==0) strcpy(buf4.winddirection,"N");
-	if (buf4.tempi==1) strcpy(buf4.winddirection,"NNE");
-	if (buf4.tempi==2) strcpy(buf4.winddirection,"NE");
-	if (buf4.tempi==3) strcpy(buf4.winddirection,"ENE");
-	if (buf4.tempi==4) strcpy(buf4.winddirection,"E");
-	if (buf4.tempi==5) strcpy(buf4.winddirection,"SEE");
-	if (buf4.tempi==6) strcpy(buf4.winddirection,"SE");
-	if (buf4.tempi==7) strcpy(buf4.winddirection,"SSE");
-	if (buf4.tempi==8) strcpy(buf4.winddirection,"S");
-	if (buf4.tempi==9) strcpy(buf4.winddirection,"SSW");
-	if (buf4.tempi==10) strcpy(buf4.winddirection,"SW");
-	if (buf4.tempi==11) strcpy(buf4.winddirection,"SWW");
-	if (buf4.tempi==12) strcpy(buf4.winddirection,"W");
-	if (buf4.tempi==13) strcpy(buf4.winddirection,"NWW");
-	if (buf4.tempi==14) strcpy(buf4.winddirection,"NW");
-	if (buf4.tempi==15) strcpy(buf4.winddirection,"NNW");
-	buf4.hindoor = buf2[273];
-	buf4.tindoor =( (unsigned char) buf2[274] + (unsigned char) buf2[275] *256);
-	buf4.houtdoor = buf2[276];
-	buf4.toutdoor =( (unsigned char) buf2[277] + (unsigned char) buf2[278] *256);
-        printf("\nUlos1: %d ja %d = %d", buf2[274], buf2[275], buf4.tindoor);
-        printf("\nUlos2: %d ja %d = %d", buf2[277], buf2[278], buf4.toutdoor);
-	buf4.pressure = (unsigned char) buf2[279] + ( 256*buf2[280]);
-	buf4.swind = buf2[281];
-	buf4.swind2 = buf2[282];
-	buf4.oth1  = buf2[283];
-	buf4.rain2 = (unsigned char) buf2[285];
-	buf4.rain =( (unsigned char) buf2[286] + (unsigned char) buf2[287] *256);
-	buf4.rain1 = buf2[286];
-	buf4.oth2 = buf2[287];
+       ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE, 0x0000009, 0x0000200, 0x0000000, buf, 0x0000008, 1000);
+       // usleep(8*1000);
+       ret = usb_interrupt_read(devh, 0x00000081, buf, 0x0000020, 1000);
+       memcpy(buf2+256, buf, 0x0000020);
+       if ( ( pdebug==1) ) printf("bytes received from device details:\n");
+       if ( ( pdebug==1) ) print_bytes(buf2+256, 32);
+       if ( ( pdebug==1) ) printf("\n");
+       buf5.delay1 = buf2[240];
+       buf5.tempi=buf2[252];
+       if (buf5.tempi==0) strcpy(buf5.winddirection,"N");
+       if (buf5.tempi==1) strcpy(buf5.winddirection,"NNE");
+       if (buf5.tempi==2) strcpy(buf5.winddirection,"NE");
+       if (buf5.tempi==3) strcpy(buf5.winddirection,"ENE");
+       if (buf5.tempi==4) strcpy(buf5.winddirection,"E");
+       if (buf5.tempi==5) strcpy(buf5.winddirection,"ESE");
+       if (buf5.tempi==6) strcpy(buf5.winddirection,"SE");
+       if (buf5.tempi==7) strcpy(buf5.winddirection,"SSE");
+       if (buf5.tempi==8) strcpy(buf5.winddirection,"S");
+       if (buf5.tempi==9) strcpy(buf5.winddirection,"SSW");
+       if (buf5.tempi==10) strcpy(buf5.winddirection,"SW");
+       if (buf5.tempi==11) strcpy(buf5.winddirection,"WSW");
+       if (buf5.tempi==12) strcpy(buf5.winddirection,"W");
+       if (buf5.tempi==13) strcpy(buf5.winddirection,"WNW");
+       if (buf5.tempi==14) strcpy(buf5.winddirection,"NW");
+       if (buf5.tempi==15) strcpy(buf5.winddirection,"NNW");
+       buf5.hindoor = buf2[241];
+       buf5.tindoor =( (unsigned char) buf2[242] + (unsigned char) buf2[243] *256);
+       buf5.tindoor &= 32767;
+       buf5.houtdoor = buf2[244];
+       buf5.toutdoor =( (unsigned char) buf2[245] + (unsigned char) buf2[246] *256);
+       buf5.toutdoor &= 32767;
+       buf5.pressure = (unsigned char) buf2[247] + ( 256*buf2[248]);
+       buf5.swind = buf2[249];
+       buf5.swind2 = buf2[250];
+       buf5.oth1  = buf2[251];
+       buf5.rain2 = (unsigned char) buf2[253];
+       buf5.rain =( (unsigned char) buf2[254] + (unsigned char) buf2[255] *256);
+       buf5.rain1 = buf2[254];
+       buf5.oth2 = buf2[255];
 
 	printf("\n");
 	unsigned int remain;
-	if ( (showall==1) | ( o1==1) ) printf("interval:              %5x\n", buf4.delay1);
-	if ( (showall==1) | ( o2==1) ) printf("indoor humidity        %5d\n", buf4.hindoor);
-	if ( (showall==1) | ( o2==1) ) printf("outdoor humidity       %5d\n", buf4.houtdoor);
-	remain = buf4.tindoor%10;
-	if ((signed) remain<0) remain = remain * -1;
-	if ( (showall==1) | ( o3==1) ) printf("indoor temperature     %5d.%d\n", buf4.tindoor / 10 ,remain);
-	remain = buf4.toutdoor%10;
-	if ((signed) remain<0) remain = remain * -1;
-	if ( (showall==1) | ( o3==1) ) printf("outdoor temperature    %5d.%d\n", buf4.toutdoor / 10 ,remain);
-	remain = buf4.swind%10;
-	if ( (showall==1) | ( o4==1) ) printf("wind speed             %5d.%d\n", buf4.swind / 10 , remain);
-	remain = buf4.swind2%10;
-	if ( (showall==1) | ( o4==1) ) printf("wind gust              %5d.%d\n", buf4.swind2 / 10 , remain);
-	if ( (showall==1) | ( o4==1) ) printf("wind direction         %5s\n", buf4.winddirection);
-	remain = buf4.rain%10;
-	if ( (showall==1) | ( o5==1) ) printf("rain                   %5d.%d\n", buf4.rain / 10 , remain);
-	remain = (buf4.rain2)%10;
-	if ( (showall==1) | ( o5==1) ) printf("rain 2                 %5d.%d\n", buf4.rain2 / 10 , remain);
-	// if ( (showall==1) | ( o5==1) ) printf("rain1                  %5d\n", buf4.rain1);
-	// if ( (showall==1) | ( o5==1) ) printf("rain2                  %5d\n", buf4.rain2);
-	if ( (showall==1) | ( o6==1) ) printf("other 1                %5d\n", buf4.oth2);
-	if ( (showall==1) | ( o6==1) ) printf("other 2                %5d\n", buf4.oth1);
-	remain = buf4.pressure%10;
-	if ( (showall==1) | ( o9==1) ) printf("pressure(hPa)          %5d.%d\n", buf4.pressure / 10 , remain);
-	if ( (showall==1) | ( o7==1) ) printf("Current history pos:   %5x\n", buf4.noffset);
+	if ( (showall==1) | ( o1==1) ) printf("interval:              %5x\n", buf5.delay1);
+	if ( (showall==1) | ( o2==1) ) printf("indoor humidity        %5d\n", buf5.hindoor);
+	if ( (showall==1) | ( o2==1) ) printf("outdoor humidity       %5d\n", buf5.houtdoor);
+	if ((buf2[243] & 128) > 0) {
+  	  if ( (showall==1) | ( o3==1) ) printf("indoor temperature     -%d.%d\n", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
+        } else {
+  	  if ( (showall==1) | ( o3==1) ) printf("indoor temperature     %d.%d\n", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
+        }
+	if ((buf2[246] & 128) > 0) {
+  	  if ( (showall==1) | ( o3==1) ) printf("outdoor temperature    -%d.%d\n", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
+        } else {
+  	  if ( (showall==1) | ( o3==1) ) printf("outdoor temperature    %d.%d\n", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
+        }
+	remain = buf5.swind%10;
+	if ( (showall==1) | ( o4==1) ) printf("wind speed             %5d.%d\n", buf5.swind / 10 , remain);
+	remain = buf5.swind2%10;
+	if ( (showall==1) | ( o4==1) ) printf("wind gust              %5d.%d\n", buf5.swind2 / 10 , remain);
+	if ( (showall==1) | ( o4==1) ) printf("wind direction         %5s\n", buf5.winddirection);
+	remain = buf5.rain%10;
+	if ( (showall==1) | ( o5==1) ) printf("rain                   %5d.%d\n", buf5.rain / 10 , remain);
+	remain = (buf5.rain2)%10;
+	if ( (showall==1) | ( o5==1) ) printf("rain 2                 %5d.%d\n", buf5.rain2 / 10 , remain);
+	// if ( (showall==1) | ( o5==1) ) printf("rain1                  %5d\n", buf5.rain1);
+	// if ( (showall==1) | ( o5==1) ) printf("rain2                  %5d\n", buf5.rain2);
+	if ( (showall==1) | ( o6==1) ) printf("other 1                %5d\n", buf5.oth2);
+	if ( (showall==1) | ( o6==1) ) printf("other 2                %5d\n", buf5.oth1);
+	remain = buf5.pressure%10;
+	if ( (showall==1) | ( o9==1) ) printf("pressure(hPa)          %5d.%d\n", buf5.pressure / 10 , remain);
+	if ( (showall==1) | ( o7==1) ) printf("Current history pos:   %5x\n", buf5.noffset);
 	printf("\n");
 
 	_close_readw();

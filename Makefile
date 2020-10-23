@@ -4,8 +4,8 @@
 VERSION = 0.2
 
 CC	= gcc
-CFLAGS	= -I./src -I/usr/include -I/usr/include/mysql/ -O2  -g -Wall
-LIBS	= -L/usr/lib/mysql/ -lm -lmysqlclient -lusb
+CFLAGS	= -I./src -I/usr/include -I/usr/include/mysql/ -O2  -g
+LIBS	= -L/usr/lib/mysql/ -lmysqlclient -lm -lz -lusb
 
 OBJS		=	wwsr.o
 HDRS		= 	wwsr.h
@@ -60,6 +60,7 @@ clean:
 		rm -f core *.asc 
 		rm -rf wwsr
 
-# Install wwsr into /usr/local/bin
-install:	all
+# Install digitemp into /usr/local/bin
+install:	wwsr
 		install -b -o root -g bin wwsr /usr/local/bin
+

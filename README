@@ -1,5 +1,6 @@
 Wireless WeatherStation USB reader.
 (C) 2007 Michael Pendec 
+	- Some changes by Michael Andersson
 
 Software is not released through any official channels, and
 thereby do not expect support from the vendor on this product.
@@ -53,18 +54,17 @@ Current status:
 	  this program as root if you have problems to give it 
 	  permissions to detach the attached drivers on startup.
 	- MySQL support for clean and neat data handling
-        - CHMS project supports wwsr (contact oh1jty@toimii.net)
+	- CHMS project supports wwsr (contact oh1jty@toimii.net)
 
 TODO:
 	- More writable commands,
  	 - Interval changes
 	 - Alarms
-	- Simple PHP web interface.
 
 Installation:
-        'make clean'
-        'make all'
-        'copy sample config to "/usr/local/etc/wwsrc.conf"'
-        'copy wwsr to "/usr/local/bin"'
-        'create proper databse and import the wwsr.sql database structure'
-        'execute program'
+	'make clean'
+	'make all'
+	'copy sample config to "/usr/local/etc/wwsrc.conf"'
+	'copy wwsr to "/usr/local/bin"'
+	'create proper databse and import the wwsr.sql database structure'
+	'execute program'

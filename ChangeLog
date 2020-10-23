@@ -1,8 +1,12 @@
+Version 0.3alpha - <oh1jty@toimii.net>
+	Fix negative temperatures
+	Reads current data
+
 Version 0.2 - <oh1jty@toimii.net>
 	MySQL support added.
 	Some code fixes and cleaning
 
-Version 0.1
+Version 0.1 - <michael.pendec@gmail.com>
 	Reading of all status functions available on the device.
 	
 	Issues found on the rain statistics, but it is read.
