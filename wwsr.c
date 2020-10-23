@@ -4,6 +4,8 @@
  *
  * Version 0.3beta
  *
+ *     09.01.2010  Juhana Virkkala (junnu@toimii.net)
+ *	   - Option (-y) to get data for easier post processing
  *     09.01.2010  Michael Andersson (oh1jty@toimii.net)
  *	   - Fix for negative temperature
  *         - Reads current data
@@ -28,7 +30,7 @@
 #include "wwsr.h"
 
 struct usb_dev_handle *devh;
-int	ret,mempos=0,showall=0,shownone=0,resetws=0,pdebug=0,mysql=0,pverbose=0;
+int	ret,mempos=0,showall=0,shownone=0,resetws=0,pdebug=0,mysql=0,pverbose=0,postprocess=0;
 int	o1,o2,o3,o4,o5,o6,o7,o8,o9,o10,o11,o12,o13,o14,o15;
 unsigned char time_format[160],
               dtf[160],
@@ -46,7 +48,7 @@ char    out1[8],
         out8[8],
         out9[8],
         out10[8];
-char    db_conf_file[1024] = "/usr/local/etc/wwsr.conf",                     /* MySQL Configuration File*/
+char    db_conf_file[1024] = "/usr/local/etc/wwsrc.conf",                     /* MySQL Configuration File*/
         dbuser[16],                             /* MySQL user name         */
         dbhost[16],                             /* MySQL hostname          */
         dbpass[16],                             /* MySQL password          */
@@ -197,7 +199,7 @@ void read_arguments(int argc, char **argv) {
 	char *mempos1=0,*endptr;
   	shownone=0;
   	o1=0;
-	while ((c = getopt (argc, argv, "akwosiurthmvp:zx")) != -1)
+	while ((c = getopt (argc, argv, "akwosiurtyhmvp:zx")) != -1)
 	{
          switch (c)
            {
@@ -258,6 +260,10 @@ void read_arguments(int argc, char **argv) {
   	     resetws=1;
 	     shownone=1;
              break;
+           case 'y':
+             postprocess=1;
+             shownone=1;
+             break;                                                
            case '?':
              if (isprint (optopt))
                fprintf (stderr, "Unknown option `-%c'.\n", optopt);
@@ -290,7 +296,7 @@ void read_arguments(int argc, char **argv) {
 	if (mempos1!=0) {
 	    	mempos = strtol(mempos1, &endptr, 16);
 	} else {
-		printf("Reading last updated record from device\n");
+		if (postprocess==0) printf("Reading last updated record from device\n");
 	}
 }
 
@@ -376,6 +382,12 @@ int main(int argc, char **argv) {
      } else if(mysql == 1) {
        
             read_rcdbfile( db_conf_file);
+            /* open the mysql database */
+            MYSQL *conn;
+            conn = mysql_init(NULL);
+            if ( (pdebug == 1) ) printf("\nhost: %s, user: %s, pass: %s, db: %s\n", dbhost, dbuser, dbpass, dbname);
+            mysql_real_connect (conn,dbhost,dbuser,dbpass,
+			  dbname,0,NULL,0);
            /* Init device */
            _open_readw();
            _init_wread();
@@ -453,51 +465,44 @@ int main(int argc, char **argv) {
 
           printf("\n");
           unsigned int remain;
-          sprintf(out1, "%d", buf5.hindoor);
-          sprintf(out2, "%d", buf5.houtdoor);
+          sprintf(out1, "%5x", buf5.hindoor);
+          sprintf(out2, "%5d", buf5.houtdoor);
 	  if ((buf2[243] & 128) > 0) {
-  	    sprintf(out3, "-%d.%d", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
+  	    sprintf(out3, "-%d.%d\n", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
           } else {
-  	    sprintf(out3, "%d.%d", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
+  	    sprintf(out3, "%d.%d\n", buf5.tindoor / 10 , abs(buf5.tindoor % 10));
           }
 	  if ((buf2[246] & 128) > 0) {
-  	    sprintf(out4, "-%d.%d", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
+  	    sprintf(out4, "-%d.%d\n", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
           } else {
-  	    sprintf(out4, "%d.%d", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
+  	    sprintf(out4, "%d.%d\n", buf5.toutdoor / 10 , abs(buf5.toutdoor % 10));
           }
           remain = buf5.swind%10;
-          sprintf(out5, "%d.%d", buf5.swind / 10 , remain);
+          sprintf(out5, "%5d.%d", buf5.swind / 10 , remain);
           remain = buf5.swind2%10;
-          sprintf(out6, "%d.%d", buf5.swind2 / 10 , remain);
-          sprintf(out7, "%s", buf5.winddirection);
+          sprintf(out6, "%5d.%d", buf5.swind2 / 10 , remain);
+          sprintf(out7, "%5s", buf5.winddirection);
           remain = buf5.rain%10;
-          sprintf(out8, "%d.%d", buf5.rain / 10 , remain);
+          sprintf(out8, "%5d.%d", buf5.rain / 10 , remain);
           remain = (buf5.rain2)%10;
-          sprintf(out9, "%d.%d", buf5.rain2 / 10 , remain);
+          sprintf(out9, "%5d.%d", buf5.rain2 / 10 , remain);
           remain = buf5.pressure%10;
-          sprintf(out10, "%d.%d", buf5.pressure / 10 , remain);
+          sprintf(out10, "%5d.%d", buf5.pressure / 10 , remain);
           printf("\n");
-
-          /* open the mysql database */
-           MYSQL *conn;
-          conn = mysql_init(NULL);
-          if ( (pdebug == 1) ) printf("\nhost: %s, user: %s, pass: %s, db: %s\n", dbhost, dbuser, dbpass, dbname);
-          mysql_real_connect (conn,dbhost,dbuser,dbpass, dbname,0,NULL,0);
-          sprintf(query, "insert into wwsr set hindoor='%s', houtdoor='%s', tindoor='%s', toutdoor='%s', windspeed='%s', windgust='%s', winddirect='%s', prain='%s', srain='%s', pressure='%s', time_date='%s'",
+          sprintf(query, "insert into wwsr set hindoor='%s', houtdoor='%s', tinddoor='%s', toutdoor='%s', windspeed='%s', windgust='%s', winddirect='%s', prain='%s', srain='%s', pressure='%s', time_date='%s'",
                   out1, out2, out3, out4, out5, out6, out7, out8, out9, out10, timed);
 
           /* execute it */
           if(mysql_query (conn, query) != 0) {
               fprintf(stderr, "\nError!! MySQL INSERT failed!\n%d: %s\n", mysql_errno(conn), mysql_error(conn));
           }
-          /* close mysql connection */
           mysql_close(conn);
           if ( ( pverbose==1) ) printf("Query: %s\n", query);
           _close_readw();
           return 0;
    } else {
        timeinfo = localtime ( &mytime );
-       printf ( "\nCurrent local time and date: %s", asctime (timeinfo) );
+       if (postprocess==0) printf ( "\nCurrent local time and date: %s", asctime (timeinfo) );
        /* Init device*/
        _open_readw();
        _init_wread();
@@ -570,7 +575,7 @@ int main(int argc, char **argv) {
        buf5.rain1 = buf2[254];
        buf5.oth2 = buf2[255];
 
-	printf("\n");
+	if (postprocess==0) printf("\n");
 	unsigned int remain;
 	if ( (showall==1) | ( o1==1) ) printf("interval:              %5x\n", buf5.delay1);
 	if ( (showall==1) | ( o2==1) ) printf("indoor humidity        %5d\n", buf5.hindoor);
@@ -601,7 +606,30 @@ int main(int argc, char **argv) {
 	remain = buf5.pressure%10;
 	if ( (showall==1) | ( o9==1) ) printf("pressure(hPa)          %5d.%d\n", buf5.pressure / 10 , remain);
 	if ( (showall==1) | ( o7==1) ) printf("Current history pos:   %5x\n", buf5.noffset);
-	printf("\n");
+	if (postprocess==0) printf("\n");
+
+
+	if (postprocess==1) {
+	
+  	   printf ("001\tInterval\t%d\tmin\n", buf5.delay1);     
+  	   printf ("002\tHumi indoor\t%d\t%%\n", buf5.hindoor);  
+  	   printf ("003\tHumi outdoor\t%d\t%%\n", buf5.houtdoor);
+           if ((buf2[243] & 128) > 0) printf ("004\tTemp indoor\t-%d.%d\tC\n", buf5.tindoor / 10, abs(buf5.tindoor % 10));   
+           else printf ("004\tTemp indoor\t%d.%d\tC\n", buf5.tindoor / 10, abs(buf5.tindoor % 10));   
+           if ((buf2[246] & 128) > 0) printf ("005\tTemp outdoor\t-%d.%d\tC\n", buf5.toutdoor / 10, abs(buf5.toutdoor % 10));
+           else  printf ("005\tTemp outdoor\t%d.%d\tC\n", buf5.toutdoor / 10, abs(buf5.toutdoor % 10));
+  	   printf ("006\tWind speed\t%d.%d\tm/s\n", buf5.swind / 10, abs(buf5.swind %10));
+  	   printf ("007\tWind gust\t%d.%d\tm/s\n", buf5.swind2 / 10, abs(buf5.swind %10));
+  	   printf ("008\tWind direction\t%d\t%s\n", buf2[252], buf5.winddirection);
+  	   printf ("009\t");
+  	   if (buf5.delay1 != 0) {
+	        printf ("Rain current \t%.1f\tmm/h\n", (double)((buf5.rain2 - buf4.rain2) + (buf5.rain1 - buf4.rain1)*256)*0.3*(60/buf5.delay1) );
+	   } else {
+	        printf ("Rain last 1h\t%.1f\tmm\n", 0.0);
+	   }
+	   printf ("010\tRain total\t%.1f\tmm\n", (double)(buf4.rain2) * 0.3);
+	   printf ("011\tPressure air\t%d.%d\thPa\n", buf5.pressure / 10, buf5.pressure % 10);
+        }
 
 	_close_readw();
 	return 0;
