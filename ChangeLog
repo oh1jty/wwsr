@@ -1,0 +1,23 @@
+Version 0.2 - <oh1jty@toimii.net>
+	MySQL support added.
+	Some code fixes and cleaning
+
+Version 0.1
+	Reading of all status functions available on the device.
+	
+	Issues found on the rain statistics, but it is read.
+	reported numbers by the device on the lcd display does not
+	match the data found in the data stream, which shows to increase
+	when its raining (a little water bottle test was made).
+
+	Experimental writing of resetting the buffer on the device,
+	functionality has been tested, and shows that the buffer is
+	reset. But option -z is used on your risk of loosing stored
+	information gathered, as the reset will make the windows client
+	software unable to read the logged entried.
+
+	Captured information with Benoits USB Sniffer and
+	converted it to C using lindi's usbsnoop2libusb.pl script.
+	
+	http://benoit.papillault.free.fr/usbsnoop/
+	http://protu.it.helsinki.fi/~lindi/usb/usbsnoop2libusb.pl
